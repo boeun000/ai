@@ -1,0 +1,499 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>해외취업 통계 시각화</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+        canvas {
+            background-color: #f9fafb;
+            border-radius: 0.5rem;
+            box-shadow: inset 0 2px 4px 0 rgba(0, 0, 0, 0.06);
+        }
+        .tooltip {
+            background-color: rgba(0, 0, 0, 0.75);
+            color: white;
+            padding: 8px 12px;
+            border-radius: 6px;
+            font-size: 14px;
+            pointer-events: none;
+            position: absolute;
+            z-index: 10;
+            white-space: nowrap;
+        }
+    </style>
+</head>
+<body class="bg-gray-100 p-4 sm:p-8">
+
+<div id="app" class="max-w-7xl mx-auto bg-white rounded-xl shadow-lg p-6 sm:p-10">
+    <!-- Header -->
+    <div class="flex items-center space-x-2 mb-6 border-b pb-4 border-gray-200">
+        <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-blue-500 w-8 h-8"><circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20M2 12h20"/></svg>
+        <h1 class="text-2xl sm:text-3xl font-bold text-gray-800">해외취업 통계 시각화</h1>
+    </div>
+
+    <!-- Navigation -->
+    <div class="mb-6 flex space-x-2 sm:space-x-4">
+        <button id="trend-tab" class="px-4 py-2 rounded-lg text-sm sm:text-base font-semibold transition-all duration-200 bg-blue-500 text-white shadow-md">
+            연도별 변화 추이
+        </button>
+        <button id="comparison-tab" class="px-4 py-2 rounded-lg text-sm sm:text-base font-semibold transition-all duration-200 bg-gray-200 text-gray-700 hover:bg-gray-300">
+            국가별 비교
+        </button>
+        <button id="rankings-tab" class="px-4 py-2 rounded-lg text-sm sm:text-base font-semibold transition-all duration-200 bg-gray-200 text-gray-700 hover:bg-gray-300">
+            인기 국가 순위
+        </button>
+    </div>
+
+    <!-- Main Content Area -->
+    <div id="content">
+        <!-- The content of the selected tab will be rendered here by JavaScript -->
+    </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script>
+    // CSV data provided by the user, stored as a multiline string.
+    const csvData = `연도,계,일본,미국 ,싱가포르,호주,아랍에미리트,중국,캐나다,베트남,인도네시아,독일,기타
+2013,1607,296,97,116,307,41,76,219,17,34,18,386
+2014,1679,338,118,249,175,50,138,79,72,44,27,389
+2015,2903,632,640,364,75,158,199,58,205,69,73,430
+2016,4811,1103,1031,642,353,323,218,56,288,144,64,589
+2017,5118,1427,1079,505,385,70,268,65,359,123,78,759
+2018,5783,1828,1380,405,397,90,198,86,383,103,88,825
+2019,6816,2469,1524,407,472,126,206,105,431,118,97,861
+2020,3811,1486,1085,263,165,24,117,117,185,50,71,248
+2021,3729,1756,864,124,196,17,133,121,263,49,61,145
+2022,4603,2138,1038,155,200,43,156,156,311,53,68,285`;
+
+    const app = document.getElementById('app');
+    const contentDiv = document.getElementById('content');
+    
+    // Global variables to store parsed data and chart instances
+    let parsedData = [];
+    let trendChartInstance = null;
+    let comparisonChartInstance = null;
+    let rankingChartInstance = null;
+
+    // Pastel color palette for the charts.
+    const pastelColors = [
+        '#a3b8e0', '#f6a7a7', '#a1e4d2', '#fddb94', '#b2d9e9', '#d6a3e0', '#b9e0a3', '#e0a3d8', '#a3e0d8', '#f8d9c4'
+    ];
+
+    /**
+     * Parses a CSV string into an array of objects.
+     * @param {string} str - The CSV data as a string.
+     * @returns {Array<Object>} The parsed data.
+     */
+    function parseCSV(str) {
+        const lines = str.trim().split('\n');
+        const headers = lines[0].split(',').map(h => h.trim());
+        return lines.slice(1).map(line => {
+            const values = line.split(',').map(v => v.trim());
+            const rowObject = {};
+            headers.forEach((header, i) => {
+                rowObject[header] = isNaN(Number(values[i])) ? values[i] : Number(values[i]);
+            });
+            return rowObject;
+        });
+    }
+
+    /**
+     * Gets a list of all country names from the parsed data.
+     * @returns {Array<string>} An array of country names.
+     */
+    function getAllCountries() {
+        if (parsedData.length === 0) return [];
+        const headers = Object.keys(parsedData[0]);
+        return headers.filter(h => h !== '연도' && h !== '계');
+    }
+
+    /**
+     * Renders the Trend Page with a Line Chart.
+     * @param {string} selectedCountry - The country to highlight.
+     */
+    function renderTrendPage(selectedCountry = '일본') {
+        contentDiv.innerHTML = `
+            <div id="trend-page">
+                <div class="flex items-center space-x-2 mb-4">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-emerald-500 w-6 h-6"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+                    <h2 class="text-xl sm:text-2xl font-semibold text-gray-700">
+                        연도별 해외 취업자 수 변화 추이
+                    </h2>
+                </div>
+                <div class="mb-6">
+                    <h3 class="text-lg font-semibold text-gray-700 mb-2">비교 국가 선택</h3>
+                    <div id="trend-country-buttons" class="flex flex-wrap gap-2"></div>
+                </div>
+                <div class="bg-gray-50 rounded-lg p-4 shadow-inner">
+                    <canvas id="trendChart"></canvas>
+                </div>
+            </div>
+        `;
+
+        const labels = parsedData.map(d => d['연도']);
+        const totalData = parsedData.map(d => d['계']);
+        const countryData = parsedData.map(d => d[selectedCountry]);
+
+        const ctx = document.getElementById('trendChart')?.getContext('2d');
+        if (!ctx) return;
+        
+        if (trendChartInstance) {
+            trendChartInstance.destroy();
+        }
+        trendChartInstance = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: labels,
+                datasets: [{
+                    label: '총 취업자 수',
+                    data: totalData,
+                    borderColor: '#3b82f6',
+                    backgroundColor: 'rgba(59, 130, 246, 0.2)',
+                    fill: false,
+                    tension: 0.1,
+                    borderWidth: 3
+                }, {
+                    label: selectedCountry,
+                    data: countryData,
+                    borderColor: pastelColors[0],
+                    backgroundColor: 'rgba(163, 184, 224, 0.2)',
+                    fill: false,
+                    tension: 0.1,
+                    borderWidth: 2
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: {
+                        position: 'top',
+                    },
+                    tooltip: {
+                        callbacks: {
+                            label: function(context) {
+                                let label = context.dataset.label || '';
+                                if (label) {
+                                    label += ': ';
+                                }
+                                if (context.parsed.y !== null) {
+                                    label += `${context.parsed.y}명`;
+                                }
+                                return label;
+                            }
+                        }
+                    }
+                },
+                scales: {
+                    x: {
+                        title: {
+                            display: true,
+                            text: '연도'
+                        }
+                    },
+                    y: {
+                        title: {
+                            display: true,
+                            text: '취업자 수'
+                        },
+                        beginAtZero: true
+                    }
+                }
+            },
+        });
+
+        // Add country selection buttons
+        const trendCountryButtonsDiv = document.getElementById('trend-country-buttons');
+        if (!trendCountryButtonsDiv) return;
+        getAllCountries().forEach(country => {
+            const button = document.createElement('button');
+            button.textContent = country;
+            button.className = `px-4 py-2 rounded-lg text-sm font-medium transition-colors duration-200 ${
+                selectedCountry === country ? 'bg-blue-500 text-white shadow-md' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+            }`;
+            button.onclick = () => renderTrendPage(country);
+            trendCountryButtonsDiv.appendChild(button);
+        });
+    }
+
+    /**
+     * Renders the Comparison Page with a Bar Chart.
+     * @param {string} selectedCountry - The country to display.
+     */
+    function renderComparisonPage(selectedCountry = '일본') {
+        contentDiv.innerHTML = `
+            <div>
+                <div class="flex items-center space-x-2 mb-4">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-purple-500 w-6 h-6"><path d="M12 20V10M18 20V4M6 20v-4"/></svg>
+                    <h2 class="text-xl sm:text-2xl font-semibold text-gray-700">
+                        선택 국가의 연도별 취업자 수 변화
+                    </h2>
+                </div>
+                <div class="mb-6">
+                    <h3 class="text-lg font-semibold text-gray-700 mb-2">국가 선택</h3>
+                    <div id="comparison-country-buttons" class="flex flex-wrap gap-2"></div>
+                </div>
+                <div class="bg-gray-50 rounded-lg p-4 shadow-inner">
+                    <canvas id="comparisonChart"></canvas>
+                </div>
+            </div>
+        `;
+
+        const labels = parsedData.map(d => d['연도']);
+        const countryData = parsedData.map(d => d[selectedCountry]);
+
+        const ctx = document.getElementById('comparisonChart')?.getContext('2d');
+        if (!ctx) return;
+        
+        if (comparisonChartInstance) {
+            comparisonChartInstance.destroy();
+        }
+        comparisonChartInstance = new Chart(ctx, {
+            type: 'bar',
+            data: {
+                labels: labels,
+                datasets: [{
+                    label: selectedCountry,
+                    data: countryData,
+                    backgroundColor: pastelColors[0],
+                    borderColor: pastelColors[0],
+                    borderWidth: 1
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: {
+                        position: 'top',
+                    },
+                    tooltip: {
+                        callbacks: {
+                            label: function(context) {
+                                let label = context.dataset.label || '';
+                                if (label) {
+                                    label += ': ';
+                                }
+                                if (context.parsed.y !== null) {
+                                    label += `${context.parsed.y}명`;
+                                }
+                                return label;
+                            }
+                        }
+                    }
+                },
+                scales: {
+                    x: {
+                        title: {
+                            display: true,
+                            text: '연도'
+                        }
+                    },
+                    y: {
+                        title: {
+                            display: true,
+                            text: '취업자 수'
+                        },
+                        beginAtZero: true
+                    }
+                }
+            }
+        });
+
+        // Add country selection buttons
+        const comparisonCountryButtonsDiv = document.getElementById('comparison-country-buttons');
+        if (!comparisonCountryButtonsDiv) return;
+        getAllCountries().forEach(country => {
+            const button = document.createElement('button');
+            button.textContent = country;
+            button.className = `px-4 py-2 rounded-lg text-sm font-medium transition-colors duration-200 ${
+                selectedCountry === country ? 'bg-blue-500 text-white shadow-md' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+            }`;
+            button.onclick = () => renderComparisonPage(country);
+            comparisonCountryButtonsDiv.appendChild(button);
+        });
+    }
+
+    /**
+     * Renders the Rankings Page with a Pie Chart and a list.
+     * @param {string} selectedYear - The year for which to display rankings.
+     */
+    function renderRankingsPage(selectedYear = '2022') {
+        contentDiv.innerHTML = `
+            <div>
+                <div class="flex items-center space-x-2 mb-4">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-orange-500 w-6 h-6"><line x1="12" x2="12" y1="20" y2="10"/><line x1="18" x2="18" y1="20" y2="4"/><line x1="6" x2="6" y1="20" y2="16"/></svg>
+                    <h2 class="text-xl sm:text-2xl font-semibold text-gray-700">
+                        인기 국가 순위 및 비중
+                    </h2>
+                </div>
+                <div class="mb-6 flex flex-col sm:flex-row sm:items-center space-y-4 sm:space-y-0 sm:space-x-4">
+                    <label for="year-select" class="text-lg font-semibold text-gray-700 whitespace-nowrap">
+                        연도 선택:
+                    </label>
+                    <div class="relative w-full sm:w-32">
+                        <select id="year-select" class="block w-full px-4 py-2 pr-8 text-gray-700 bg-white border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 appearance-none transition duration-150 ease-in-out">
+                            <!-- Options will be dynamically added here -->
+                        </select>
+                    </div>
+                </div>
+                <div class="bg-gray-50 rounded-lg p-4 shadow-inner">
+                    <canvas id="rankingChart"></canvas>
+                </div>
+                <div class="mt-8">
+                    <h3 class="text-xl font-semibold text-gray-700 mb-4 border-b pb-2" id="ranking-list-title">
+                        ${selectedYear}년 해외취업 인기 국가 순위
+                    </h3>
+                    <ol class="list-decimal pl-5 space-y-2" id="ranking-list"></ol>
+                </div>
+            </div>
+        `;
+
+        const yearData = parsedData.find(d => String(d['연도']) === selectedYear);
+        if (!yearData) return;
+
+        // Process data for the pie chart and popular countries list.
+        const countryData = Object.keys(yearData)
+            .filter(key => key !== '연도' && key !== '계')
+            .map(key => ({ name: key, value: yearData[key] }));
+
+        countryData.sort((a, b) => b.value - a.value);
+
+        const topCountries = countryData.slice(0, 5);
+        const otherCountriesTotal = countryData.slice(5).reduce((sum, item) => sum + item.value, 0);
+
+        const pieChartData = [
+            ...topCountries,
+            { name: '기타', value: otherCountriesTotal }
+        ];
+
+        const ctx = document.getElementById('rankingChart')?.getContext('2d');
+        if (!ctx) return;
+        
+        if (rankingChartInstance) {
+            rankingChartInstance.destroy();
+        }
+        rankingChartInstance = new Chart(ctx, {
+            type: 'pie',
+            data: {
+                labels: pieChartData.map(d => d.name),
+                datasets: [{
+                    data: pieChartData.map(d => d.value),
+                    backgroundColor: pastelColors.slice(0, pieChartData.length),
+                    borderColor: '#ffffff',
+                    borderWidth: 2
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: {
+                        position: 'top',
+                    },
+                    tooltip: {
+                        callbacks: {
+                            label: function(context) {
+                                const label = context.label || '';
+                                const value = context.raw || 0;
+                                const total = context.chart.data.datasets[0].data.reduce((sum, val) => sum + val, 0);
+                                const percentage = total > 0 ? ((value / total) * 100).toFixed(1) : 0;
+                                return `${label}: ${value}명 (${percentage}%)`;
+                            }
+                        }
+                    }
+                }
+            }
+        });
+
+        // Add year selection options
+        const yearSelect = document.getElementById('year-select');
+        if (!yearSelect) return;
+        parsedData.map(d => String(d['연도'])).forEach(year => {
+            const option = document.createElement('option');
+            option.value = year;
+            option.textContent = `${year}년`;
+            if (year === selectedYear) {
+                option.selected = true;
+            }
+            yearSelect.appendChild(option);
+        });
+        yearSelect.onchange = (e) => renderRankingsPage(e.target.value);
+
+        // Add ranking list
+        const rankingList = document.getElementById('ranking-list');
+        if (!rankingList) return;
+        rankingList.innerHTML = '';
+        topCountries.forEach((country, index) => {
+            const li = document.createElement('li');
+            li.className = 'text-lg font-medium text-gray-800';
+            li.innerHTML = `<span class="font-bold text-blue-600">${index + 1}위</span>: ${country.name} (${country.value}명)`;
+            rankingList.appendChild(li);
+        });
+    }
+    
+    // The previous error was caused by calling getElementById on elements that didn't exist yet because the JS was at the top of the body. 
+    // This fix moves the logic to a single entry point after the DOM is ready.
+    // We also added null checks to each function to ensure they don't throw errors if an element is not found,
+    // which can happen in a dynamic, single-page application structure.
+    window.onload = function() {
+        parsedData = parseCSV(csvData);
+        // Initial page render for the trend tab
+        renderTrendPage();
+
+        // Improved tab switching logic with null checks
+        const trendTabBtn = document.getElementById('trend-tab');
+        const comparisonTabBtn = document.getElementById('comparison-tab');
+        const rankingsTabBtn = document.getElementById('rankings-tab');
+
+        if (trendTabBtn) {
+            trendTabBtn.addEventListener('click', () => {
+                switchTab(trendTabBtn);
+            });
+        }
+        if (comparisonTabBtn) {
+            comparisonTabBtn.addEventListener('click', () => {
+                switchTab(comparisonTabBtn);
+            });
+        }
+        if (rankingsTabBtn) {
+            rankingsTabBtn.addEventListener('click', () => {
+                switchTab(rankingsTabBtn);
+            });
+        }
+        
+        function switchTab(newTabBtn) {
+            // Deactivate all tabs with null checks
+            if (trendTabBtn) trendTabBtn.classList.remove('bg-blue-500', 'text-white', 'shadow-md');
+            if (trendTabBtn) trendTabBtn.classList.add('bg-gray-200', 'text-gray-700');
+            if (comparisonTabBtn) comparisonTabBtn.classList.remove('bg-blue-500', 'text-white', 'shadow-md');
+            if (comparisonTabBtn) comparisonTabBtn.classList.add('bg-gray-200', 'text-gray-700');
+            if (rankingsTabBtn) rankingsTabBtn.classList.remove('bg-blue-500', 'text-white', 'shadow-md');
+            if (rankingsTabBtn) rankingsTabBtn.classList.add('bg-gray-200', 'text-gray-700');
+            
+            // Activate the new tab
+            if (newTabBtn) newTabBtn.classList.remove('bg-gray-200', 'text-gray-700');
+            if (newTabBtn) newTabBtn.classList.add('bg-blue-500', 'text-white', 'shadow-md');
+            
+            // Render the corresponding page
+            if (newTabBtn.id === 'trend-tab') {
+                renderTrendPage();
+            } else if (newTabBtn.id === 'comparison-tab') {
+                renderComparisonPage();
+            } else if (newTabBtn.id === 'rankings-tab') {
+                renderRankingsPage();
+            }
+        }
+    };
+</script>
+
+</body>
+</html>
